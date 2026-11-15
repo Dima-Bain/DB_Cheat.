@@ -1,4 +1,4 @@
--- 🔥DBCheat🔥 v3
+-- 🔥DBCheat🔥 v7
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 -- ==================== АВТОЗАКРЫТИЕ СТАРОЙ ВЕРСИИ ====================
@@ -63,7 +63,7 @@ local Limits = {
 local State = {
     Speed = false, JumpBoost = false, InfJump = false,
     Fly = false, Noclip = false,
-    Chairs = false, ChairsHide = false,
+    Chairs = false, ChairsHide = false, LowGfx = false, MM2 = false,
     ESP = false, FreecamArmed = false, FreecamActive = false,
     Teleport = false, DayNightTouched = false, IsNight = false,
 }
@@ -76,6 +76,7 @@ local savedClock
 local fcPos, fcYaw, fcPitch, fcRMB = ZERO, 0, 0, false
 local Closing, Silent = false, true
 local frame, dnBtn
+local splashDone, onLoaded = false, nil
 local chairFolder
 
 -- ==================== СОХРАНЕНИЕ НАСТРОЕК ====================
@@ -91,7 +92,12 @@ local Saved = {}
 local ToggleOf = {
     Speed = "Speed", JumpBoost = "JumpBoost", InfJump = "InfJump",
     Noclip = "Noclip", ESP = "ESP", FreecamArmed = "Freecam", Teleport = "Teleport",
+    LowGfx = "LowGfx", MM2 = "MM2",
 }
+
+-- При запуске все переключатели выключены (так меньше багов).
+-- Запоминается только Noclip: он действует лишь во время полёта.
+local RestoreStates = {Noclip = true}
 
 if canSave then
     local ok, data = pcall(function()
@@ -127,13 +133,12 @@ local function saveNow()
     local keys = {}
     for id, k in pairs(Keybinds) do keys[id] = k.Name end
     local states = {}
-    for stateId in pairs(ToggleOf) do states[stateId] = State[stateId] and true or false end
+    for stateId in pairs(RestoreStates) do states[stateId] = State[stateId] and true or false end
     local data = {
         version = SAVE_VERSION,
         settings = Settings,
         keys = keys,
         states = states,
-        dayNight = {touched = State.DayNightTouched, night = State.IsNight},
     }
     if frame then
         local p = frame.Position
@@ -244,6 +249,7 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "DBCheatGui"
 gui.ResetOnSpawn = false
 gui.DisplayOrder = 999
+gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = guiParent
 
@@ -253,6 +259,7 @@ frame.Position = UDim2.new(0.5, -280, 0.5, -200)
 frame.BackgroundColor3 = C.Bg
 frame.BorderSizePixel = 0
 frame.Parent = gui
+frame.Visible = false -- покажем после приветствия
 round(frame, 12)
 
 if type(Saved.pos) == "table" and #Saved.pos == 4 then
@@ -338,6 +345,463 @@ content.BackgroundColor3 = C.Panel
 content.BorderSizePixel = 0
 content.Parent = frame
 round(content, 10)
+
+-- ==================== ЗАСТАВКА (ПРИВЕТСТВИЕ) ====================
+-- Показывается при запуске: искры, вращающиеся кольца, печатающееся название,
+-- полоса загрузки. Клик по экрану пропускает. Затем появляется меню.
+local frameScale = Instance.new("UIScale")
+frameScale.Scale = 0.85
+frameScale.Parent = frame
+
+local splashAlive = false
+
+local function circle(o)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0.5, 0)
+    c.Parent = o
+    return c
+end
+
+local function tw(obj, t, props, style, dir)
+    TweenService:Create(obj, TweenInfo.new(t, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props):Play()
+end
+
+local function runSplash()
+    splashAlive = true
+    local skipped = false
+
+    local group = Instance.new("CanvasGroup")
+    group.Name = "Splash"
+    group.Size = UDim2.new(1, 0, 1, 0)
+    group.BackgroundColor3 = Color3.fromRGB(8, 8, 14)
+    group.BackgroundTransparency = 0.12
+    group.BorderSizePixel = 0
+    group.GroupTransparency = 1
+    group.ZIndex = 50
+    group.Parent = gui
+
+    local function alive() return not Closing and group.Parent ~= nil end
+    local function sleep(t)
+        local t0 = os.clock()
+        while os.clock() - t0 < t and not skipped and alive() do task.wait() end
+    end
+
+    -- искры, летящие снизу вверх
+    local embers = Instance.new("Frame")
+    embers.Size = UDim2.new(1, 0, 1, 0)
+    embers.BackgroundTransparency = 1
+    embers.Parent = group
+    local emberColors = {C.Accent, C.Accent2, Color3.fromRGB(255, 205, 90)}
+    task.spawn(function()
+        while splashAlive and alive() do
+            local size = math.random(3, 9)
+            local x = math.random()
+            local e = Instance.new("Frame")
+            e.AnchorPoint = Vector2.new(0.5, 0.5)
+            e.Size = UDim2.new(0, size, 0, size)
+            e.Position = UDim2.new(x, 0, 1.05, 0)
+            e.BackgroundColor3 = emberColors[math.random(1, #emberColors)]
+            e.BorderSizePixel = 0
+            e.Parent = embers
+            circle(e)
+            local tn = TweenService:Create(e,
+                TweenInfo.new(2.2 + math.random() * 2.4, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+                {
+                    Position = UDim2.new(math.clamp(x + (math.random() - 0.5) * 0.25, 0, 1), 0, 0.1 + math.random() * 0.55, 0),
+                    BackgroundTransparency = 1,
+                })
+            tn.Completed:Connect(function() e:Destroy() end)
+            tn:Play()
+            task.wait(0.05)
+        end
+    end)
+
+    -- вращающиеся лучи за логотипом
+    local rays = Instance.new("Frame")
+    rays.AnchorPoint = Vector2.new(0.5, 0.5)
+    rays.Position = UDim2.new(0.5, 0, 0.5, -110)
+    rays.Size = UDim2.new(0, 760, 0, 760)
+    rays.BackgroundTransparency = 1
+    rays.Parent = group
+    for i = 0, 11 do
+        local bar = Instance.new("Frame")
+        bar.AnchorPoint = Vector2.new(0.5, 0.5)
+        bar.Position = UDim2.new(0.5, 0, 0.5, 0)
+        bar.Size = UDim2.new(0, 5, 0, 760)
+        bar.Rotation = i * 15
+        bar.BackgroundColor3 = (i % 2 == 0) and C.Accent or C.Accent2
+        bar.BackgroundTransparency = 0.65
+        bar.BorderSizePixel = 0
+        bar.Parent = rays
+        local bg = Instance.new("UIGradient")
+        bg.Rotation = 90
+        bg.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.5, 0),
+            NumberSequenceKeypoint.new(1, 1),
+        })
+        bg.Parent = bar
+    end
+    TweenService:Create(rays,
+        TweenInfo.new(18, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+        {Rotation = 360}):Play()
+
+    -- расходящиеся волны от логотипа
+    task.spawn(function()
+        task.wait(0.35)
+        while splashAlive and alive() do
+            local ring = Instance.new("Frame")
+            ring.AnchorPoint = Vector2.new(0.5, 0.5)
+            ring.Position = UDim2.new(0.5, 0, 0.5, -110)
+            ring.Size = UDim2.new(0, 100, 0, 100)
+            ring.BackgroundTransparency = 1
+            ring.Parent = embers
+            circle(ring)
+            local st = Instance.new("UIStroke")
+            st.Thickness = 3
+            st.Color = C.Accent
+            st.Transparency = 0.2
+            st.Parent = ring
+            tw(ring, 1.6, {Size = UDim2.new(0, 760, 0, 760)})
+            local tn = TweenService:Create(st,
+                TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                {Transparency = 1})
+            tn.Completed:Connect(function() ring:Destroy() end)
+            tn:Play()
+            task.wait(0.8)
+        end
+    end)
+
+    -- мерцающие звёздочки
+    task.spawn(function()
+        while splashAlive and alive() do
+            local sp = Instance.new("TextLabel")
+            sp.AnchorPoint = Vector2.new(0.5, 0.5)
+            sp.Size = UDim2.new(0, 30, 0, 30)
+            sp.Position = UDim2.new(0.5, math.random(-300, 300), 0.5, math.random(-230, 150))
+            sp.BackgroundTransparency = 1
+            sp.Text = "✦"
+            sp.Font = Enum.Font.GothamBold
+            sp.TextSize = math.random(10, 22)
+            sp.TextColor3 = emberColors[math.random(1, #emberColors)]
+            sp.TextTransparency = 1
+            sp.Parent = embers
+            local tn = TweenService:Create(sp,
+                TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 0, true),
+                {TextTransparency = 0.05, Rotation = 90})
+            tn.Completed:Connect(function() sp:Destroy() end)
+            tn:Play()
+            task.wait(0.1)
+        end
+    end)
+
+    -- вспышка на старте
+    local flash = Instance.new("Frame")
+    flash.Size = UDim2.new(1, 0, 1, 0)
+    flash.BackgroundColor3 = Color3.fromRGB(255, 190, 120)
+    flash.BackgroundTransparency = 0.35
+    flash.BorderSizePixel = 0
+    flash.ZIndex = 20
+    flash.Parent = group
+    tw(flash, 0.7, {BackgroundTransparency = 1})
+    task.delay(0.8, function() flash:Destroy() end)
+
+    -- размытие игры на время заставки
+    local blur = Lighting:FindFirstChild("DBCheatBlur") or Instance.new("BlurEffect")
+    blur.Name = "DBCheatBlur"
+    blur.Size = 0
+    blur.Parent = Lighting
+    tw(blur, 0.6, {Size = 16})
+
+    -- логотип: свечение, два вращающихся кольца и огонь
+    local logo = Instance.new("Frame")
+    logo.AnchorPoint = Vector2.new(0.5, 0.5)
+    logo.Position = UDim2.new(0.5, 0, 0.5, -110)
+    logo.Size = UDim2.new(0, 190, 0, 190)
+    logo.BackgroundTransparency = 1
+    logo.Parent = group
+    local logoScale = Instance.new("UIScale")
+    logoScale.Scale = 0.2
+    logoScale.Parent = logo
+
+    local glow = Instance.new("Frame")
+    glow.AnchorPoint = Vector2.new(0.5, 0.5)
+    glow.Position = UDim2.new(0.5, 0, 0.5, 0)
+    glow.Size = UDim2.new(0, 230, 0, 230)
+    glow.BackgroundColor3 = C.Accent
+    glow.BackgroundTransparency = 0.82
+    glow.BorderSizePixel = 0
+    glow.Parent = logo
+    circle(glow)
+    TweenService:Create(glow,
+        TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+        {BackgroundTransparency = 0.94, Size = UDim2.new(0, 270, 0, 270)}):Play()
+
+    local function makeRing(size, c1, c2, rotateTo, speed)
+        local r = Instance.new("Frame")
+        r.AnchorPoint = Vector2.new(0.5, 0.5)
+        r.Position = UDim2.new(0.5, 0, 0.5, 0)
+        r.Size = UDim2.new(0, size, 0, size)
+        r.BackgroundTransparency = 1
+        r.Parent = logo
+        circle(r)
+        local st = Instance.new("UIStroke")
+        st.Thickness = 4
+        st.Color = Color3.new(1, 1, 1)
+        st.Parent = r
+        local g = Instance.new("UIGradient")
+        g.Color = ColorSequence.new(c1, c2)
+        g.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(0.55, 0),
+            NumberSequenceKeypoint.new(0.6, 1),
+            NumberSequenceKeypoint.new(1, 1),
+        })
+        g.Parent = st
+        TweenService:Create(g,
+            TweenInfo.new(speed, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+            {Rotation = rotateTo}):Play()
+        return r
+    end
+    makeRing(190, C.Accent, C.Accent2, 360, 1.6)
+    makeRing(150, C.Accent2, Color3.fromRGB(255, 205, 90), -360, 2.2)
+
+    local flame = Instance.new("TextLabel")
+    flame.Size = UDim2.new(1, 0, 1, 0)
+    flame.BackgroundTransparency = 1
+    flame.Text = "🔥"
+    flame.TextSize = 70
+    flame.Font = Enum.Font.GothamBlack
+    flame.TextColor3 = Color3.new(1, 1, 1)
+    flame.Parent = logo
+    local flameScale = Instance.new("UIScale")
+    flameScale.Parent = flame
+    TweenService:Create(flameScale,
+        TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+        {Scale = 1.12}):Play()
+
+    -- название (печатается по буквам)
+    local title = Instance.new("TextLabel")
+    title.AnchorPoint = Vector2.new(0.5, 0.5)
+    title.Position = UDim2.new(0.5, 0, 0.5, 10)
+    title.Size = UDim2.new(0, 600, 0, 70)
+    title.BackgroundTransparency = 1
+    title.Text = "DBCheat"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 60
+    title.Parent = group
+    local titleGrad = fireGradient(title)
+    TweenService:Create(titleGrad,
+        TweenInfo.new(3, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+        {Rotation = 380}):Play()
+    local titleStroke = Instance.new("UIStroke")
+    titleStroke.Thickness = 2
+    titleStroke.Color = C.Accent
+    titleStroke.Transparency = 0.55
+    titleStroke.Parent = title
+    local titleScale = Instance.new("UIScale")
+    titleScale.Parent = title
+    local okTW = pcall(function() title.MaxVisibleGraphemes = 0 end)
+    if not okTW then title.TextTransparency = 1 end
+
+    local sub = Instance.new("TextLabel")
+    sub.AnchorPoint = Vector2.new(0.5, 0.5)
+    sub.Position = UDim2.new(0.5, 0, 0.5, 72)
+    sub.Size = UDim2.new(0, 600, 0, 28)
+    sub.BackgroundTransparency = 1
+    sub.Text = "DBCheat приветствует тебя, " .. Player.DisplayName .. "!"
+    sub.TextColor3 = C.Text
+    sub.TextTransparency = 1
+    sub.Font = Enum.Font.GothamMedium
+    sub.TextSize = 20
+    sub.Parent = group
+
+    -- полоса загрузки
+    local track = Instance.new("Frame")
+    track.AnchorPoint = Vector2.new(0.5, 0.5)
+    track.Position = UDim2.new(0.5, 0, 0.5, 118)
+    track.Size = UDim2.new(0, 340, 0, 8)
+    track.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
+    track.BackgroundTransparency = 1
+    track.BorderSizePixel = 0
+    track.Parent = group
+    round(track, 4)
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = Color3.new(1, 1, 1)
+    fill.BackgroundTransparency = 1
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    round(fill, 4)
+    fireGradient(fill).Rotation = 0
+
+    -- светящаяся точка на конце полосы
+    local dot = Instance.new("Frame")
+    dot.AnchorPoint = Vector2.new(0.5, 0.5)
+    dot.Position = UDim2.new(1, 0, 0.5, 0)
+    dot.Size = UDim2.new(0, 14, 0, 14)
+    dot.BackgroundColor3 = Color3.new(1, 1, 1)
+    dot.BackgroundTransparency = 1
+    dot.BorderSizePixel = 0
+    dot.Parent = fill
+    circle(dot)
+    local dotStroke = Instance.new("UIStroke")
+    dotStroke.Thickness = 4
+    dotStroke.Color = C.Accent
+    dotStroke.Transparency = 1
+    dotStroke.Parent = dot
+
+    local status = Instance.new("TextLabel")
+    status.AnchorPoint = Vector2.new(0.5, 0.5)
+    status.Position = UDim2.new(0.5, 0, 0.5, 140)
+    status.Size = UDim2.new(0, 340, 0, 20)
+    status.BackgroundTransparency = 1
+    status.Text = ""
+    status.TextColor3 = C.Dim
+    status.TextTransparency = 1
+    status.Font = Enum.Font.Gotham
+    status.TextSize = 13
+    status.Parent = group
+
+    local hint = Instance.new("TextLabel")
+    hint.AnchorPoint = Vector2.new(0.5, 1)
+    hint.Position = UDim2.new(0.5, 0, 1, -24)
+    hint.Size = UDim2.new(0, 300, 0, 18)
+    hint.BackgroundTransparency = 1
+    hint.Text = "нажмите, чтобы пропустить"
+    hint.TextColor3 = C.Dim
+    hint.TextTransparency = 1
+    hint.Font = Enum.Font.Gotham
+    hint.TextSize = 12
+    hint.Parent = group
+
+    local skipBtn = Instance.new("TextButton")
+    skipBtn.Size = UDim2.new(1, 0, 1, 0)
+    skipBtn.BackgroundTransparency = 1
+    skipBtn.Text = ""
+    skipBtn.ZIndex = 100
+    skipBtn.Parent = group
+    skipBtn.MouseButton1Click:Connect(function() skipped = true end)
+
+    -- ===== сценарий =====
+    tw(group, 0.35, {GroupTransparency = 0})
+    tw(logoScale, 0.7, {Scale = 1}, Enum.EasingStyle.Back)
+    sleep(0.5)
+    if not alive() then return end
+
+    if okTW then
+        for i = 1, 7 do
+            if skipped or not alive() then break end
+            title.MaxVisibleGraphemes = i
+            titleScale.Scale = 1.08
+            tw(titleScale, 0.14, {Scale = 1})
+            sleep(0.07)
+        end
+        title.MaxVisibleGraphemes = -1
+    else
+        tw(title, 0.4, {TextTransparency = 0})
+    end
+    tw(sub, 0.5, {TextTransparency = 0, Position = UDim2.new(0.5, 0, 0.5, 62)})
+    sleep(0.45)
+    tw(track, 0.3, {BackgroundTransparency = 0})
+    tw(fill, 0.3, {BackgroundTransparency = 0})
+    tw(dot, 0.3, {BackgroundTransparency = 0.05})
+    tw(dotStroke, 0.3, {Transparency = 0.5})
+    tw(status, 0.3, {TextTransparency = 0})
+    tw(hint, 0.3, {TextTransparency = 0.35})
+    sleep(0.3)
+    if not alive() then return end
+
+    local stages = {
+        {0.00, "Инициализация модулей..."},
+        {0.30, "Загрузка настроек..."},
+        {0.60, "Подготовка интерфейса..."},
+        {0.90, "Почти готово..."},
+    }
+    local dur = 2.4
+    local t0 = os.clock()
+    while alive() and not skipped do
+        local a = math.min(1, (os.clock() - t0) / dur)
+        local e = TweenService:GetValue(a, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+        fill.Size = UDim2.new(e, 0, 1, 0)
+        local label = stages[1][2]
+        for _, st in ipairs(stages) do
+            if e >= st[1] then label = st[2] end
+        end
+        status.Text = label .. " " .. math.floor(e * 100) .. "%"
+        if a >= 1 then break end
+        task.wait()
+    end
+    if not alive() then return end
+
+    fill.Size = UDim2.new(1, 0, 1, 0)
+    status.Text = "Готово! 100%"
+    status.TextColor3 = C.Accent
+    -- взрыв искр из логотипа
+    for i = 1, 28 do
+        local ang = (i / 28) * math.pi * 2 + math.random() * 0.2
+        local dist = 180 + math.random() * 160
+        local sz = math.random(4, 8)
+        local b = Instance.new("Frame")
+        b.AnchorPoint = Vector2.new(0.5, 0.5)
+        b.Position = UDim2.new(0.5, 0, 0.5, -110)
+        b.Size = UDim2.new(0, sz, 0, sz)
+        b.BackgroundColor3 = emberColors[math.random(1, #emberColors)]
+        b.BorderSizePixel = 0
+        b.Parent = group
+        circle(b)
+        local tn = TweenService:Create(b,
+            TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            {
+                Position = UDim2.new(0.5, math.cos(ang) * dist, 0.5, -110 + math.sin(ang) * dist),
+                BackgroundTransparency = 1,
+            })
+        tn.Completed:Connect(function() b:Destroy() end)
+        tn:Play()
+    end
+    tw(logoScale, 0.18, {Scale = 1.18}, Enum.EasingStyle.Back)
+    task.wait(0.2)
+    tw(logoScale, 0.25, {Scale = 1})
+    sleep(0.3)
+    tw(group, 0.5, {GroupTransparency = 1})
+    tw(blur, 0.5, {Size = 0})
+    task.wait(0.55)
+    splashAlive = false
+    group:Destroy()
+    blur:Destroy()
+end
+
+task.spawn(function()
+    pcall(runSplash)
+    splashAlive = false
+    pcall(function()
+        local b = Lighting:FindFirstChild("DBCheatBlur")
+        if b then b:Destroy() end
+    end)
+    local g = gui:FindFirstChild("Splash")
+    if g then g:Destroy() end
+    if Closing then return end
+
+    -- меню появляется с «выпрыгиванием»
+    local base = frame.Position
+    frame.Visible = true
+    local t1 = os.clock()
+    while not Closing do
+        local a = math.min(1, (os.clock() - t1) / 0.4)
+        local sc = 0.85 + 0.15 * TweenService:GetValue(a, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        frameScale.Scale = sc
+        frame.Position = UDim2.new(base.X.Scale, base.X.Offset + (1 - sc) * 280,
+                                   base.Y.Scale, base.Y.Offset + (1 - sc) * 200)
+        if a >= 1 then break end
+        task.wait()
+    end
+    frameScale.Scale = 1
+    frame.Position = base
+    frameScale:Destroy()
+    splashDone = true
+    if onLoaded then onLoaded() end
+end)
 
 -- ==================== УВЕДОМЛЕНИЯ ====================
 local lastNote
@@ -747,46 +1211,75 @@ table.insert(Conns, Player.CharacterRemoving:Connect(function()
     if State.Chairs and Toggles.Chairs then Toggles.Chairs.Set(false) end
 end))
 
--- ==================== ПРОЗРАЧНОСТЬ ПЕРСОНАЖА ====================
--- 1) Fly + Noclip: если между камерой и персонажем стена или персонаж внутри
---    стены, он становится полупрозрачным.
+-- ==================== ПРОЗРАЧНОСТЬ ====================
+-- 1) Fly + Noclip: полупрозрачными становятся БЛОКИ, которых касается персонаж,
+--    и блоки, закрывающие его от камеры. Персонаж остаётся виден.
+--    (Только у вас на экране; ландшафт Terrain сделать прозрачным нельзя.)
 -- 2) Стулья + «Скрыть персонажа»: персонаж невидим.
-local wallMod, lastMod = 0, 0
+local WALL_ALPHA = 0.75
+local faded = {}
+local hideLast = 0
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 pcall(function() rayParams.RespectCanCollide = true end)
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function isObstructed(char, root)
-    local c = cam()
-    if not c then return false end
-    local origin = c.CFrame.Position
+local function collectWallParts(char, root)
+    local set = {}
     local ignore = {char}
     if chairFolder then table.insert(ignore, chairFolder) end
 
-    for _ = 1, 4 do
-        rayParams.FilterDescendantsInstances = ignore
-        local hit = workspace:Raycast(origin, root.Position - origin, rayParams)
-        if not hit then break end
-        local inst = hit.Instance
-        if isCharacterPart(inst) then
-            local m = inst:FindFirstAncestorOfClass("Model")
-            table.insert(ignore, m)
-        elseif inst == workspace.Terrain or inst.Transparency < 0.95 then
-            return true
-        else
-            table.insert(ignore, inst)
+    -- блоки между камерой и персонажем
+    local c = cam()
+    if c then
+        local origin = c.CFrame.Position
+        local toRoot = root.Position - origin
+        for _ = 1, 8 do
+            rayParams.FilterDescendantsInstances = ignore
+            local hit = workspace:Raycast(origin, toRoot, rayParams)
+            if not hit then break end
+            local inst = hit.Instance
+            if isCharacterPart(inst) then
+                table.insert(ignore, inst:FindFirstAncestorOfClass("Model"))
+            else
+                table.insert(ignore, inst)
+                if inst ~= workspace.Terrain and inst.Transparency < 0.95 then
+                    set[inst] = true
+                end
+            end
         end
     end
 
+    -- блоки, которых касается персонаж
     overlapParams.FilterDescendantsInstances = ignore
-    for _, p in ipairs(workspace:GetPartBoundsInRadius(root.Position, 2, overlapParams)) do
-        if p.CanCollide and p.Transparency < 0.95 and not isCharacterPart(p) then
-            return true
+    local parts = workspace:GetPartBoundsInBox(root.CFrame, Vector3.new(6, 7, 6), overlapParams)
+    for _, p in ipairs(parts) do
+        if not p:IsA("Terrain") and p.CanCollide and p.Transparency < 0.95
+            and not isCharacterPart(p) then
+            set[p] = true
         end
     end
-    return false
+    return set
+end
+
+-- плавно прячем блоки из set и возвращаем остальные
+local function fadeWalls(dt, set)
+    for p in pairs(set) do
+        if faded[p] == nil then faded[p] = 0 end
+    end
+    local k = math.min(1, dt * 12)
+    for p, cur in pairs(faded) do
+        if not p.Parent then
+            faded[p] = nil
+        else
+            local target = set[p] and WALL_ALPHA or 0
+            local new = cur + (target - cur) * k
+            if math.abs(new - target) < 0.01 then new = target end
+            p.LocalTransparencyModifier = new
+            if new == 0 and not set[p] then faded[p] = nil else faded[p] = new end
+        end
+    end
 end
 
 local function applyMod(char, mod)
@@ -802,26 +1295,133 @@ end
 local function updateTransparency(dt)
     if Closing then return end
     local char, _, root = getChar()
-    if not char or not root then return end
 
-    local target = 0
-    if State.Fly and State.Noclip then
-        local ok, obstructed = pcall(isObstructed, char, root)
-        if ok and obstructed then target = 0.75 end
+    local set = {}
+    if char and root and State.Fly and State.Noclip then
+        local ok, res = pcall(collectWallParts, char, root)
+        if ok and res then set = res end
     end
-    wallMod = wallMod + (target - wallMod) * math.min(1, dt * 12)
-    if math.abs(wallMod - target) < 0.01 then wallMod = target end
+    fadeWalls(dt, set)
 
-    local hideMod = (State.Chairs and State.ChairsHide) and 1 or 0
-    local mod = math.max(wallMod, hideMod)
-    if mod > 0 or lastMod > 0 then
-        applyMod(char, mod)
+    if char then
+        local hideMod = (State.Chairs and State.ChairsHide) and 1 or 0
+        if hideMod > 0 or hideLast > 0 then applyMod(char, hideMod) end
+        hideLast = hideMod
     end
-    lastMod = mod
 end
 
 pcall(function() RunService:UnbindFromRenderStep("DBCheatTransparency") end)
 RunService:BindToRenderStep("DBCheatTransparency", Enum.RenderPriority.Camera.Value + 1, updateTransparency)
+
+-- ==================== ПОНИЖЕНИЕ ГРАФИКИ ====================
+-- Всё меняется только на вашей стороне и полностью возвращается при выключении.
+local gfx = {
+    saved = setmetatable({}, {__mode = "k"}),
+    token = 0,
+    active = false,
+    conn = nil,
+    quality = nil,
+}
+
+local function gfxSet(inst, prop, value)
+    local rec = gfx.saved[inst]
+    if not rec then
+        rec = {}
+        gfx.saved[inst] = rec
+    end
+    if rec[prop] == nil then
+        local ok, old = pcall(function() return inst[prop] end)
+        if not ok or old == nil then return end
+        rec[prop] = old
+    end
+    pcall(function() inst[prop] = value end)
+end
+
+local function lowGfxInstance(inst)
+    if inst:IsA("BasePart") then
+        if inst:IsA("Terrain") then return end
+        gfxSet(inst, "Material", Enum.Material.SmoothPlastic)
+        gfxSet(inst, "Reflectance", 0)
+        gfxSet(inst, "CastShadow", false)
+    elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
+        or inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Sparkles") then
+        gfxSet(inst, "Enabled", false)
+    elseif inst:IsA("PointLight") or inst:IsA("SpotLight") or inst:IsA("SurfaceLight") then
+        gfxSet(inst, "Shadows", false)
+    elseif inst:IsA("Texture") or inst:IsA("Decal") then
+        if not isCharacterPart(inst) then gfxSet(inst, "Transparency", 1) end
+    end
+end
+
+local function applyLowGfxGlobals()
+    pcall(function()
+        local r = settings().Rendering
+        if gfx.quality == nil then gfx.quality = r.QualityLevel end
+        r.QualityLevel = Enum.QualityLevel.Level01
+    end)
+    gfxSet(Lighting, "GlobalShadows", false)
+    for _, e in ipairs(Lighting:GetChildren()) do
+        if e:IsA("PostEffect") then gfxSet(e, "Enabled", false) end
+    end
+    local c = cam()
+    if c then
+        for _, e in ipairs(c:GetChildren()) do
+            if e:IsA("PostEffect") then gfxSet(e, "Enabled", false) end
+        end
+    end
+    local t = workspace:FindFirstChildOfClass("Terrain")
+    if t then
+        gfxSet(t, "Decoration", false)
+        gfxSet(t, "WaterWaveSize", 0)
+        gfxSet(t, "WaterWaveSpeed", 0)
+        gfxSet(t, "WaterReflectance", 0)
+    end
+end
+
+local function setLowGfx(on)
+    gfx.token = gfx.token + 1
+    local token = gfx.token
+    gfx.active = on
+    if gfx.conn then
+        pcall(function() gfx.conn:Disconnect() end)
+        gfx.conn = nil
+    end
+
+    if on then
+        applyLowGfxGlobals()
+        gfx.conn = workspace.DescendantAdded:Connect(function(inst)
+            if gfx.active and not Closing then
+                task.defer(function() pcall(lowGfxInstance, inst) end)
+            end
+        end)
+        task.spawn(function() -- порциями, чтобы не вешать игру
+            local n = 0
+            for _, inst in ipairs(workspace:GetDescendants()) do
+                if token ~= gfx.token then return end
+                pcall(lowGfxInstance, inst)
+                n = n + 1
+                if n % 1500 == 0 then task.wait() end
+            end
+        end)
+    else
+        task.spawn(function()
+            local n = 0
+            for inst, props in pairs(gfx.saved) do
+                if token ~= gfx.token then return end
+                for prop, v in pairs(props) do
+                    pcall(function() inst[prop] = v end)
+                end
+                gfx.saved[inst] = nil
+                n = n + 1
+                if n % 1500 == 0 then task.wait() end
+            end
+            if token == gfx.token and gfx.quality ~= nil then
+                pcall(function() settings().Rendering.QualityLevel = gfx.quality end)
+                gfx.quality = nil
+            end
+        end)
+    end
+end
 
 -- ==================== ЛОГИКА: ВИЗУАЛ ====================
 table.insert(Conns, RunService.Heartbeat:Connect(function()
@@ -862,10 +1462,99 @@ local function updateESP()
     end
 end
 
+-- ESP для Murder Mystery 2: роли определяются по предметам игрока.
+-- Нож (Knife) = убийца (красный), пистолет (Gun) = шериф (синий), остальные = мирные (зелёные).
+local MM2 = {}
+local MM2_ROLES = {
+    murderer = {Color3.fromRGB(255, 40, 40), "УБИЙЦА"},
+    sheriff = {Color3.fromRGB(40, 120, 255), "ШЕРИФ"},
+    innocent = {Color3.fromRGB(60, 220, 90), "МИРНЫЙ"},
+}
+
+local function mm2Flags(p)
+    local knife, gun = false, false
+    local function scan(container)
+        if not container then return end
+        for _, t in ipairs(container:GetChildren()) do
+            if t:IsA("Tool") then
+                local n = t.Name:lower()
+                if n:find("knife", 1, true) then knife = true end
+                if n:find("gun", 1, true) or n:find("revolver", 1, true) then gun = true end
+            end
+        end
+    end
+    scan(p.Character)
+    scan(p:FindFirstChildOfClass("Backpack"))
+    return knife, gun
+end
+
+local function destroyMM2Item(p)
+    local item = MM2[p]
+    if item then
+        pcall(function() item.hl:Destroy() end)
+        pcall(function() item.bb:Destroy() end)
+        MM2[p] = nil
+    end
+end
+
+local function clearMM2()
+    for p in pairs(MM2) do destroyMM2Item(p) end
+end
+
+local function updateMM2()
+    if not State.MM2 then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= Player then
+            local char = p.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local head = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
+            if not (char and hum and head) or hum.Health <= 0 then
+                destroyMM2Item(p)
+            else
+                local item = MM2[p]
+                if not item or item.char ~= char then
+                    destroyMM2Item(p)
+                    local hl = Instance.new("Highlight")
+                    hl.FillTransparency = 0.45
+                    hl.OutlineTransparency = 0
+                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    hl.Adornee = char
+                    hl.Parent = char
+                    local bb = Instance.new("BillboardGui")
+                    bb.Size = UDim2.new(0, 140, 0, 36)
+                    bb.StudsOffset = Vector3.new(0, 3.2, 0)
+                    bb.AlwaysOnTop = true
+                    bb.Adornee = head
+                    bb.Parent = char
+                    local lbl = Instance.new("TextLabel")
+                    lbl.Size = UDim2.new(1, 0, 1, 0)
+                    lbl.BackgroundTransparency = 1
+                    lbl.Font = Enum.Font.GothamBold
+                    lbl.TextSize = 13
+                    lbl.TextStrokeTransparency = 0.3
+                    lbl.Parent = bb
+                    item = {char = char, hl = hl, bb = bb, lbl = lbl}
+                    MM2[p] = item
+                end
+                local knife, gun = mm2Flags(p)
+                local role = knife and MM2_ROLES.murderer or (gun and MM2_ROLES.sheriff or MM2_ROLES.innocent)
+                item.hl.FillColor = role[1]
+                item.hl.OutlineColor = role[1]
+                item.lbl.TextColor3 = role[1]
+                item.lbl.Text = p.Name .. "\n" .. role[2]
+            end
+        end
+    end
+    for p in pairs(MM2) do
+        if not p.Parent then destroyMM2Item(p) end
+    end
+end
+
 task.spawn(function()
     while gui.Parent do
         pcall(updateESP)
-        task.wait(0.5)
+        pcall(updateMM2)
+        task.wait(0.3)
     end
 end)
 
@@ -990,7 +1679,7 @@ end, function()
     if State.Noclip and not State.Fly then return " (с полётом)" end
     return ""
 end)
-Toggles.Chairs = createToggle(flyP, "Стулья (кол-во мест)", function(v)
+Toggles.Chairs = createToggle(flyP, "Стулья: места (только у вас)", function(v)
     State.Chairs = v
     if v then
         if not buildChairs() then
@@ -1013,14 +1702,29 @@ Toggles.ChairsHide = createToggle(flyP, "Скрыть персонажа (сту
     State.ChairsHide = v
     if State.Chairs then buildChairs() end
 end)
-createLabel(flyP, "WASD — движение, Space — вверх, Ctrl — вниз.\nNoclip работает только в полёте. Если за стеной персонаж оказывается между камерой и стеной или внутри неё, он становится полупрозрачным. Выбор Noclip запоминается и возвращается при следующем полёте.\nСтулья: 5 в ряд, следующие ряды идут назад. ⚠ Стулья создаются на вашей стороне: другие игроки их не увидят и сесть на них не смогут.", 130)
+createLabel(flyP, "WASD — движение, Space — вверх, Ctrl — вниз.\nNoclip работает только в полёте: блоки, которых касается персонаж или которые закрывают его от камеры, становятся полупрозрачными, а персонаж остаётся виден. Ландшафт (Terrain) прозрачным сделать нельзя. Выбор Noclip запоминается и возвращается при следующем полёте.\nСтулья: 5 в ряд, следующие ряды идут назад. ⚠ Стулья создаются только на вашей стороне: другие игроки их не видят и сесть на них не смогут (ограничение Roblox, скриптом не обходится).", 150)
 
 -- Визуал
 local visP = createTab("👀 Визуал")
 Toggles.ESP = createToggle(visP, "ESP (игроки)", function(v)
     State.ESP = v
-    if v then pcall(updateESP) else clearESP() end
+    if v then
+        if State.MM2 and Toggles.MM2 then Toggles.MM2.Set(false) end
+        pcall(updateESP)
+    else
+        clearESP()
+    end
 end)
+Toggles.MM2 = createToggle(visP, "ESP MM2 (роли)", function(v)
+    State.MM2 = v
+    if v then
+        if State.ESP and Toggles.ESP then Toggles.ESP.Set(false) end
+        pcall(updateMM2)
+    else
+        clearMM2()
+    end
+end)
+createLabel(visP, "MM2: убийца (нож) — красный, шериф (пистолет) — синий, мирные — зелёные. Роль определяется по предметам Knife и Gun у игрока (в руках или в рюкзаке). Если предмет лежит в рюкзаке и игра не передаёт его вам, роль появится, когда игрок достанет предмет. ESP и ESP MM2 включаются по очереди.", 85)
 Toggles.Freecam = createToggle(visP, "Freecam", function(v)
     State.FreecamArmed = v
     if not v then stopFreecam() end
@@ -1043,6 +1747,11 @@ local function toggleDayNight()
 end
 dnBtn = createButton(visP, "☀️ Сменить день / ночь", toggleDayNight)
 Toggles.Teleport = createToggle(visP, "Teleport (Ctrl + клик)", function(v) State.Teleport = v end)
+Toggles.LowGfx = createToggle(visP, "Низкая графика", function(v)
+    State.LowGfx = v
+    setLowGfx(v)
+end)
+createLabel(visP, "Низкая графика: убирает тени, пост-эффекты, частицы и блики, упрощает материалы и текстуры, снижает качество. Действует только на вашей стороне, при выключении всё возвращается. На больших картах применение занимает несколько секунд.", 70)
 
 -- Телепорт к игрокам
 local tpP = createTab("📍 К игрокам")
@@ -1256,7 +1965,9 @@ local Actions = {
         end
         if State.FreecamActive then stopFreecam() else startFreecam() end
     end,
-    Menu = function() frame.Visible = not frame.Visible end,
+    Menu = function()
+        if splashDone then frame.Visible = not frame.Visible end
+    end,
 }
 
 table.insert(Conns, UIS.InputBegan:Connect(function(input, gp)
@@ -1319,7 +2030,7 @@ local function Close()
     saveNow() -- сохраняем до сброса переключателей
     Closing = true
     stopFreecam()
-    for _, name in ipairs({"Speed", "JumpBoost", "InfJump", "Fly", "Chairs", "ESP", "Teleport"}) do
+    for _, name in ipairs({"Speed", "JumpBoost", "InfJump", "Fly", "Chairs", "ESP", "MM2", "Teleport", "LowGfx"}) do
         if Toggles[name] then pcall(Toggles[name].Set, false) end
     end
     pcall(function() RunService:UnbindFromRenderStep("DBCheatTransparency") end)
@@ -1328,7 +2039,14 @@ local function Close()
     stopFly()
     clearChairs()
     clearESP()
+    clearMM2()
+    pcall(function()
+        local b = Lighting:FindFirstChild("DBCheatBlur")
+        if b then b:Destroy() end
+    end)
     restoreCollide()
+    for part in pairs(faded) do pcall(function() part.LocalTransparencyModifier = 0 end) end
+    faded = {}
     local char = getChar()
     if char then pcall(applyMod, char, 0) end
     for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
@@ -1353,21 +2071,18 @@ end)
 -- ==================== ВОССТАНОВЛЕНИЕ СОХРАНЁННОГО ====================
 if type(Saved.states) == "table" then
     for stateId, toggleId in pairs(ToggleOf) do
-        if Saved.states[stateId] == true and Toggles[toggleId] then
+        if RestoreStates[stateId] and Saved.states[stateId] == true and Toggles[toggleId] then
             pcall(Toggles[toggleId].Set, true)
         end
     end
 end
-if type(Saved.dayNight) == "table" and Saved.dayNight.touched == true then
-    savedClock = Lighting.ClockTime
-    State.DayNightTouched = true
-    State.IsNight = Saved.dayNight.night == true
-    updateDnText()
-end
 
-Silent = false
-if canSave then
-    notify(next(Saved) and "🔥 DBCheat загружен, настройки восстановлены" or "🔥 DBCheat загружен")
-else
-    notify("🔥 DBCheat загружен (сохранение недоступно)")
+local function loadedNotice()
+    Silent = false
+    if canSave then
+        notify(next(Saved) and "🔥 DBCheat загружен, настройки восстановлены" or "🔥 DBCheat загружен")
+    else
+        notify("🔥 DBCheat загружен (сохранение недоступно)")
+    end
 end
+if splashDone then loadedNotice() else onLoaded = loadedNotice end
