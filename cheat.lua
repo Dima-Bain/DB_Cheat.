@@ -1,4 +1,4 @@
--- 🔥DBCheat🔥 v9
+-- 🔥DBCheat🔥 v12
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 -- ==================== АВТОЗАКРЫТИЕ СТАРОЙ ВЕРСИИ ====================
@@ -1320,60 +1320,72 @@ table.insert(Conns, RunService.RenderStepped:Connect(function()
 end))
 
 -- ==================== ФЛИНГЕР ====================
--- Работает незаметно: вы сами стоите и ходите как обычно (персонаж
--- не раскручивается и не меняется), а игроков, которые вас коснутся,
--- отбрасывает импульсом. Noclip не мешает, т.к. это не физика столкновений
--- вашего тела, а точечный импульс конкретному игроку при касании.
+-- ВАЖНО (технический предел движка/сети Roblox): скрипт на вашей стороне
+-- физически не может напрямую подвинуть персонажа ДРУГОГО игрока — каждый
+-- игрок считает физику только своего тела, и любые изменения, сделанные
+-- вами напрямую над чужим персонажем, видны только у вас и ни на кого на
+-- самом деле не влияют. Единственный способ реально отбросить другого —
+-- чтобы ВАШЕ СОБСТВЕННОЕ тело быстро крутилось, пока вы его касаетесь:
+-- тогда клиент этого игрока сам посчитает столкновение и по-настоящему
+-- отбросит себя. Поэтому вращение длится РОВНО столько, сколько длится
+-- реальное касание (а не по жёсткому таймеру — так оно не «зависает» и
+-- само гаснет, едва вы разошлись), камера при этом не поворачивается.
 local flingerConns = {}
-local flingerCooldown = {}
+local flingerTouching = {}
+local flingerSpinning = false
+local flingSavedAuto
 
-local function flingPlayer(victim)
-    local vChar = victim.Character
-    if not vChar then return end
-    local vRoot = vChar:FindFirstChild("HumanoidRootPart")
-    local vHum = vChar:FindFirstChildOfClass("Humanoid")
-    if not vRoot or not vHum then return end
-
-    local now = os.clock()
-    if flingerCooldown[victim] and now - flingerCooldown[victim] < 0.4 then return end
-    flingerCooldown[victim] = now
-
-    local _, _, myRoot = getChar()
-    local away = ZERO
-    if myRoot then
-        away = vRoot.Position - myRoot.Position
-    end
-    away = Vector3.new(away.X, 0, away.Z)
-    if away.Magnitude < 0.05 then
-        local a = math.random() * math.pi * 2
-        away = Vector3.new(math.cos(a), 0, math.sin(a))
-    else
-        away = away.Unit
-    end
-
-    local power = Settings.FlingPower
-    local vel = away * (power * 3) + Vector3.new(0, power * 2.2, 0)
-
-    local bv = Instance.new("BodyVelocity")
-    bv.Name = "DBFling"
-    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    bv.P = 1250
-    bv.Velocity = vel
-    bv.Parent = vRoot
-
-    local wasPlatform = vHum.PlatformStand
-    vHum.PlatformStand = true
-    task.delay(0.15, function()
-        if vHum and vHum.Parent then vHum.PlatformStand = wasPlatform end
-    end)
-    task.delay(0.25, function()
-        if bv then bv:Destroy() end
-    end)
+local function flingerCount()
+    local n = 0
+    for _ in pairs(flingerTouching) do n = n + 1 end
+    return n
 end
+
+local function flingerStopSpin()
+    if not flingerSpinning then return end
+    flingerSpinning = false
+    local _, hum, root = getChar()
+    if root and root.Parent then
+        pcall(function() root.AssemblyAngularVelocity = ZERO end)
+    end
+    if hum and hum.Parent and flingSavedAuto ~= nil then
+        pcall(function() hum.AutoRotate = flingSavedAuto end)
+    end
+    flingSavedAuto = nil
+end
+
+local function flingerStartSpin()
+    if flingerSpinning then return end
+    local _, hum = getChar()
+    if not hum then return end
+    flingerSpinning = true
+    flingSavedAuto = hum.AutoRotate
+    pcall(function() hum.AutoRotate = false end)
+end
+
+table.insert(Conns, RunService.Heartbeat:Connect(function()
+    if not State.Flinger then
+        if flingerSpinning then flingerStopSpin() end
+        return
+    end
+    if flingerCount() > 0 then
+        flingerStartSpin()
+        local _, _, root = getChar()
+        if root and root.Parent then
+            pcall(function()
+                root.AssemblyAngularVelocity = Vector3.new(0, Settings.FlingPower * 20, 0)
+            end)
+        end
+    elseif flingerSpinning then
+        flingerStopSpin()
+    end
+end))
 
 local function clearFlingerTouch()
     for _, c in ipairs(flingerConns) do pcall(function() c:Disconnect() end) end
     flingerConns = {}
+    flingerTouching = {}
+    flingerStopSpin()
 end
 
 local function setupFlingerTouch()
@@ -1382,21 +1394,24 @@ local function setupFlingerTouch()
     if not char then return end
     for _, part in ipairs(char:GetDescendants()) do
         if part:IsA("BasePart") then
-            local c = part.Touched:Connect(function(hit)
+            local c1 = part.Touched:Connect(function(hit)
                 if not State.Flinger then return end
                 if hit:IsDescendantOf(char) then return end
                 local m = hit:FindFirstAncestorOfClass("Model")
                 if not m then return end
                 local victim = Players:GetPlayerFromCharacter(m)
                 if victim and victim ~= Player then
-                    flingPlayer(victim)
+                    flingerTouching[hit] = true
                 end
             end)
-            table.insert(flingerConns, c)
+            local c2 = part.TouchEnded:Connect(function(hit)
+                flingerTouching[hit] = nil
+            end)
+            table.insert(flingerConns, c1)
+            table.insert(flingerConns, c2)
         end
     end
 end
-
 
 -- Noclip: запоминаем исходный CanCollide и ВОЗВРАЩАЕМ при выключении
 -- (раньше детали оставались «проходимыми», пока не перезапустишь полёт)
@@ -1430,6 +1445,9 @@ end))
 table.insert(Conns, Player.CharacterAdded:Connect(function()
     noclipOrig = {}
     noclipActive = false
+    flingerTouching = {}
+    flingerSpinning = false
+    flingSavedAuto = nil
     if State.Fly and Toggles.Fly then Toggles.Fly.Set(false) end
     if State.Flinger then task.defer(setupFlingerTouch) end
 end))
@@ -1959,6 +1977,7 @@ Toggles.Fly = createToggle(flyP, "Полёт", function(v)
 end)
 Toggles.Noclip = createToggle(flyP, "Noclip", function(v)
     State.Noclip = v
+    if v and State.Flinger and Toggles.Flinger then Toggles.Flinger.Set(false) end
 end, function()
     if State.Noclip and not State.Fly then return " (с полётом)" end
     return ""
@@ -1966,10 +1985,10 @@ end)
 Toggles.Flinger = createToggle(flyP, "Флингер (сила)", function(v)
     State.Flinger = v
     if v then
+        if State.Noclip and Toggles.Noclip then Toggles.Noclip.Set(false) end
         setupFlingerTouch()
     else
         clearFlingerTouch()
-        flingerCooldown = {}
     end
 end, nil, {key = "FlingPower", name = "Флингер"})
 Toggles.Chairs = createToggle(flyP, "Стулья: места (только у вас)", function(v)
@@ -1995,7 +2014,7 @@ Toggles.ChairsHide = createToggle(flyP, "Скрыть персонажа (сту
     State.ChairsHide = v
     if State.Chairs then buildChairs() end
 end)
-createLabel(flyP, "WASD — движение, Space — вверх, Ctrl — вниз.\nNoclip работает только в полёте: блоки, которых касается персонаж или которые закрывают его от камеры, становятся полупрозрачными, а персонаж остаётся виден. Ландшафт (Terrain) прозрачным сделать нельзя. Выбор Noclip запоминается и возвращается при следующем полёте.\nФлингер: работает незаметно — вы спокойно стоите и ходите, а игроков, которые вас коснутся, отбрасывает. Сила 1–500 задаётся в поле, действует на земле и в полёте. Результат зависит от игры.\nСтулья: 5 в ряд, следующие ряды идут назад. ⚠ Стулья создаются только на вашей стороне: другие игроки их не видят и сесть на них не смогут (ограничение Roblox, скриптом не обходится).", 200)
+createLabel(flyP, "WASD — движение, Space — вверх, Ctrl — вниз.\nNoclip работает только в полёте: блоки, которых касается персонаж или которые закрывают его от камеры, становятся полупрозрачными, а персонаж остаётся виден. Ландшафт (Terrain) прозрачным сделать нельзя. Выбор Noclip запоминается и возвращается при следующем полёте.\nФлингер: это физический предел Roblox — отбросить по-настоящему ДРУГОГО игрока можно только через столкновение с вашим же телом, и пока вы его касаетесь, ваш персонаж быстро крутится (камера не поворачивается). Как только вы разошлись, вращение сразу гаснет само. Сила 1–500 в поле — если эффект слабый, увеличьте; если персонажа кидает слишком резко или странно, уменьшите. Нужно выключить Noclip — без столкновений флингер не действует. Поведение может отличаться от игры к игре.\nСтулья: 5 в ряд, следующие ряды идут назад. ⚠ Стулья создаются только на вашей стороне: другие игроки их не видят и сесть на них не смогут (ограничение Roblox, скриптом не обходится).", 240)
 
 -- Визуал
 local visP = createTab("👀 Визуал")
